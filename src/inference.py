@@ -3,82 +3,86 @@ import torch
 import models
 import dataset
 import numpy as np
-from torchvision.transforms import v2
-from PIL import Image
+import cv2
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+class ToTensor:
+    def __call__(self, img1, img2):
+        img1 = torch.tensor(img1, dtype=torch.float).unsqueeze(0)  # Add channel dimension
+        img2 = torch.tensor(img2, dtype=torch.float).unsqueeze(0)  # Add channel dimension
+        return img1, img2
 
 def load_model(model_path, device):
     """Load the trained model from the specified path."""
-    model = models.UNet(n_channels=2, n_classes=1).to(device)
+    model = models.UNet(n_channels=2, n_classes=1, kernel_size=5).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()  # Set the model to evaluation mode
+    model.eval()
     return model
 
-def preprocess_image(image_path, transform):
+def preprocess_image(image_path):
     """Preprocess the input image for the model."""
-    image = Image.open(image_path).convert('L')  # Convert to grayscale if needed
-    image = transform(image)
-    image = image.unsqueeze(0)  # Add batch dimension
-    return image
+    to_tensor = ToTensor()
+
+    files = sorted(os.listdir(image_path))
+    img_name1, img_name2 = files[0], files[1]
+    img_path1 = os.path.join(image_path, img_name1)
+    img_path2 = os.path.join(image_path, img_name2)
+
+    image1 = cv2.imread(img_path1, cv2.IMREAD_GRAYSCALE)
+    image2 = cv2.imread(img_path2, cv2.IMREAD_GRAYSCALE)
+
+    image1, image2 = to_tensor(image1, image2)
+    image1 = (image1 / 255).float()
+    image2 = (image2 / 255).float()
+
+    return torch.cat((image1, image2), dim=0)
 
 def predict(model, image_tensor, device):
     """Run inference and get the model prediction."""
-    image_tensor = image_tensor.to(device)
+    image_tensor = image_tensor.unsqueeze(0).to(device)
     with torch.no_grad():
         output = model(image_tensor)
     return output
 
 def postprocess_output(output):
     """Convert the model output to a binary mask."""
-    mask = output > 0.5  # Apply threshold
-    return mask.squeeze().cpu().numpy()  # Convert to NumPy array, remove batch dimension
+    mask = output > 0.5
+    return mask.squeeze().cpu().numpy()
 
-def save_mask(mask, output_path):
+def save_mask(mask, f_path):
     """Save the binary mask as an image."""
-    mask_image = Image.fromarray((mask * 255).astype(np.uint8))  # Convert to uint8 for saving
-    mask_image.save(output_path)
+    mask_image = (255 * mask).astype(np.uint8)
+    plt.imsave(os.path.join(f_path, "predicted_mask.png"), mask_image, cmap='gray')    
 
-def run_inference(model, image_paths, output_dir, transform, device):
-    """Run inference on multiple images."""
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+def run_inference(model, f_path, device):
+    """Run inference on single manufactured part."""
+    image_tensor = preprocess_image(f_path)
 
-    for image_path in image_paths:
-        image_name = os.path.basename(image_path)
-        output_path = os.path.join(output_dir, f"mask_{image_name}")
+    # Predict mask
+    output = predict(model, image_tensor, device)
 
-        # Preprocess the image
-        image_tensor = preprocess_image(image_path, transform)
+    # Postprocess and save the mask
+    mask = postprocess_output(output)
+    save_mask(mask, f_path)
 
-        # Predict mask
-        output = predict(model, image_tensor, device)
-
-        # Postprocess and save the mask
-        mask = postprocess_output(output)
-        save_mask(mask, output_path)
-
-        print(f"Saved mask for {image_name} at {output_path}")
 
 def main():
     # Paths and hyperparameters
-    model_path = 'best_model.pth'
-    image_dir = '../data/test/images'  # Directory containing test images
-    output_dir = '../data/test/predicted_masks'
+    model_path = 'best_model144.pth'
+    test_dir = "../test_data"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # Data transformation (resize as necessary and convert to tensor)
-    transform = v2.Compose([
-        v2.Resize((100, 120)),
-        v2.ToTensor()
-    ])
 
     # Load the model
     model = load_model(model_path, device)
 
-    # List of image paths to process
-    image_paths = [os.path.join(image_dir, fname) for fname in os.listdir(image_dir) if fname.endswith('.jpg')]
+    test_images = [f.path for f in os.scandir(test_dir) if f.is_dir()]
 
-    # Run inference
-    run_inference(model, image_paths, output_dir, transform, device)
+    for i in tqdm(range(len(test_images))):
+        folder = test_images[i]
+        f_path = os.path.join(test_dir, folder)
+        run_inference(model, f_path, device)
+
 
 if __name__ == '__main__':
     main()

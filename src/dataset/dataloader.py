@@ -68,7 +68,7 @@ class TPXDataset(Dataset):
         self.toTensor = ToTensor()
 
     def __len__(self):
-        return len(self.folders) # Since we have two input images for each mask
+        return len(self.folders)
 
     def __getitem__(self, idx):
         folder = self.folders[idx]

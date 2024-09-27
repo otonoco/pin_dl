@@ -131,7 +131,7 @@ def train_val_split(dataset, val_split=0.25):
 
 def main():
     # Hyperparameters
-    batch_size = 50
+    batch_size = 100
     num_epochs = 300
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
